@@ -18,6 +18,8 @@ services:
       CF_RANDOM: "60"
       # 单次探测超时（秒）
       CF_TIMEOUT: "3"
+      # 订阅输出前几个 IP，0 = 全部；也可用 /sub?n=3 临时覆盖
+      CF_TOP: "0"
       CF_STATE_FILE: /data/state.json
       TZ: Asia/Shanghai
     volumes:

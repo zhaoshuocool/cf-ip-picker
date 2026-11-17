@@ -23,7 +23,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 # --------------------------------------------------------------------------
 # 配置
@@ -38,6 +38,8 @@ CF_TIMEOUT = float(os.environ.get("CF_TIMEOUT", "3"))
 CF_WORKERS = int(os.environ.get("CF_WORKERS", "32"))
 CF_FINALISTS = int(os.environ.get("CF_FINALISTS", "20"))
 CF_ROUNDS = int(os.environ.get("CF_ROUNDS", "3"))
+# 订阅里输出前几个 IP，0 表示全部输出
+CF_TOP = int(os.environ.get("CF_TOP", "0"))
 CF_STATE_FILE = os.environ.get("CF_STATE_FILE", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
@@ -310,6 +312,8 @@ DASHBOARD = """<!doctype html>
 <div class="card">
   <div class="sub" style="margin-bottom:8px">订阅地址（v2rayN：订阅 → 添加）</div>
   <code id="suburl"></code>
+  <div class="sub" style="margin-top:6px">加 <code>?n=3</code> 只取前 3 条（默认输出全部可达 IP），例如
+    <code id="suburl3"></code></div>
   <div class="sub" style="margin-top:10px;margin-bottom:4px">当前最优节点的分享链接</div>
   <div class="link" id="bestlink">-</div>
 </div>
@@ -320,18 +324,30 @@ async function tick(){
     const d = await r.json();
     const t = d.updated_at ? new Date(d.updated_at*1000).toLocaleString() : '尚未扫描';
     document.getElementById('sub').textContent =
-      `域名 ${d.host}${d.path} · 上次扫描 ${t} · 共测 ${d.tested} 个 · 可达 ${d.reachable} 个`;
+      `域名 ${d.host}${d.path} · 上次扫描 ${t} · 共测 ${d.tested} 个 · 可达 ${d.reachable} 个 · 订阅 ${d.links.length} 条`;
     const rows = d.results.slice(0,10).map((x,i)=>
       `<tr><td>${i+1}</td><td class="${i===0?'best':''}">${x.ip}</td>
        <td>${x.ok}/${x.total}</td><td>${x.avg_ms} ms</td><td>${x.code}</td></tr>`).join('');
     document.getElementById('rows').innerHTML = rows || '<tr><td colspan="5">扫描中或暂无可用 IP</td></tr>';
     document.getElementById('suburl').textContent = location.origin + '/sub';
+    document.getElementById('suburl3').textContent = location.origin + '/sub?n=3';
     document.getElementById('bestlink').textContent =
       (d.links && d.links[0]) ? d.links[0] : '未设置 CF_UUID，无法生成分享链接';
   }catch(e){ document.getElementById('sub').textContent = '读取失败: '+e; }
 }
 tick(); setInterval(tick, 15000);
 </script></body></html>"""
+
+
+def requested_top(query):
+    """?n=3 覆盖 CF_TOP；返回 0 表示不限制条数。"""
+    raw = (query.get("n") or [None])[0]
+    if raw is not None:
+        try:
+            return max(int(raw), 0)
+        except (TypeError, ValueError):
+            pass
+    return max(CF_TOP, 0)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -354,7 +370,9 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
-        route = urlparse(self.path).path.rstrip("/") or "/"
+        parsed = urlparse(self.path)
+        route = parsed.path.rstrip("/") or "/"
+        query = parse_qs(parsed.query)
         data = snapshot()
 
         if route in ("/", "/index.html"):
@@ -365,11 +383,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"ok": True}))
         if route == "/sub":
             links = [l for l in data["links"] if l]
+            limit = requested_top(query)
+            if limit:
+                links = links[:limit]
             return self._send(200, "\n".join(links) + ("\n" if links else ""),
                               "text/plain; charset=utf-8")
         if route == "/best.txt":
+            rows = data["results"]
+            limit = requested_top(query)
+            if limit:
+                rows = rows[:limit]
             lines = ["{} {}ms {}/{}".format(r["ip"], r["avg_ms"], r["ok"], r["total"])
-                     for r in data["results"]]
+                     for r in rows]
             return self._send(200, "\n".join(lines) + "\n", "text/plain; charset=utf-8")
         return self._send(404, json.dumps({"error": "not found"}))
 

@@ -148,6 +148,7 @@ https://gist.githubusercontent.com/<你的用户名>/<gist id>/raw/cf-sub.txt
 | `CF_WORKERS` | `32` | 并发线程数 |
 | `CF_FINALISTS` | `20` | 进入复测的候选数 |
 | `CF_ROUNDS` | `3` | 每个候选复测次数 |
+| `CF_TOP` | `0` | 订阅里输出前几个 IP；`0` = 全部可达 IP |
 | `CF_STATE_FILE` | 空 | 结果落盘路径，如 `/data/state.json` |
 | `PORT` | `8080` | Web 端口 |
 
@@ -157,7 +158,7 @@ https://gist.githubusercontent.com/<你的用户名>/<gist id>/raw/cf-sub.txt
 | --- | --- |
 | `/` | 网页仪表盘，15 秒自动刷新 |
 | `/api/best` | JSON，完整排名与耗时 |
-| `/sub` | **订阅地址**，纯文本，每行一条 `vless://`（可直接粘进 v2rayN） |
+| `/sub` | **订阅地址**，纯文本，每行一条 `vless://`（可直接粘进 v2rayN）。加 `?n=3` 只取前 3 条，覆盖 `CF_TOP` |
 | `/best.txt` | 纯文本排名，方便脚本读取 |
 | `/healthz` | 健康检查 |
 
