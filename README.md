@@ -59,6 +59,54 @@ docker compose up -d
 镜像来自 GHCR 公共仓库，**不需要登录**。若 NAS 访问不了 ghcr.io，
 可在 fnOS 的 Docker 设置里配置镜像加速，或在本机构建后 `docker save` / `docker load`。
 
+## 青龙面板 / cron 版
+
+不想跑常驻容器，只要一个「定时跑一次、把结果推给你」的脚本，
+用 [`qinglong/cf_ip_picker.py`](qinglong/cf_ip_picker.py)。纯标准库，**无需 `pip install`**。
+
+### 装进青龙
+
+```bash
+# 在青龙面板「定时任务 → 新建任务」里，先把脚本拉下来
+ql raw https://raw.githubusercontent.com/zhaoshuocool/cf-ip-picker/main/qinglong/cf_ip_picker.py
+```
+
+然后新建定时任务：
+
+| 项 | 填写 |
+| --- | --- |
+| 任务名称 | `cf-ip-picker` |
+| 命令 | `python3 /ql/data/scripts/cf_ip_picker.py` |
+| 定时规则 | `15 */6 * * *`（每 6 小时的第 15 分钟跑一次） |
+
+环境变量在青龙面板「环境变量」里加，最少只要 `CF_HOST` 和 `CF_UUID`：
+
+| 变量 | 说明 |
+| --- | --- |
+| `CF_HOST` | 节点域名（必填） |
+| `CF_UUID` | 节点 UUID，填了才输出 vless 链接 |
+| `CF_PATH` | WS 路径，默认 `/link` |
+| `CF_RANDOM` | 随机探测 IP 数，默认 60 |
+| `CF_TIMEOUT` | 单次超时秒数，默认 3 |
+| `CF_WORKERS` | 并发，默认 32 |
+| `CF_TOP` | 日志输出前几名，默认 5 |
+| `CF_OUTPUT` | 结果目录，默认脚本同目录 |
+| `CF_NOTIFY_ALWAYS` | 设 `1` 则每轮都推送，默认只在「值得换」时推 |
+
+### 推送渠道（有哪个填哪个）
+
+`BARK_PUSH`、`PUSH_PLUS_TOKEN`、`TG_BOT_TOKEN` + `TG_CHAT_ID`、`WECOM_WEBHOOK`、`SERVERCHAN_SENDKEY`。
+一个都没配就只写日志，照样能在面板里看结果。
+
+**默认不会每轮打扰你**：只有上一轮推荐的 IP 不可达了，或者新首选比它快 20% 以上，才会推送一条。
+设 `CF_NOTIFY_ALWAYS=1` 可改成每轮都推。
+
+### 产出
+
+- `cf_best.txt` —— 排名纯文本
+- `cf_sub.txt` —— 前 N 名的 `vless://` 链接，每行一条，可整段导入 v2rayN
+- `cf_picker_state.json` —— 上一轮结果，用于变化检测
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
