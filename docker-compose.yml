@@ -1,0 +1,29 @@
+services:
+  cf-ip-picker:
+    image: ghcr.io/zhaoshuocool/cf-ip-picker:latest
+    container_name: cf-ip-picker
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # 你的节点域名（必填）
+      CF_HOST: link.example.com
+      # WebSocket 路径，和 3X-UI / xray 入站保持一致
+      CF_PATH: /link
+      # 节点 UUID，填了才会生成 /sub 订阅和 vless 分享链接
+      CF_UUID: 00000000-0000-0000-0000-000000000000
+      # 定时重扫间隔（秒），最低 60
+      CF_INTERVAL: "3600"
+      # 每轮随机探测的 IP 个数
+      CF_RANDOM: "60"
+      # 单次探测超时（秒）
+      CF_TIMEOUT: "3"
+      CF_STATE_FILE: /data/state.json
+      TZ: Asia/Shanghai
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=4)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3

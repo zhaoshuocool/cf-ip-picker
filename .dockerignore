@@ -1,0 +1,7 @@
+.git
+.github
+data
+*.pyc
+__pycache__
+*.log
+cf-best-ips.txt
