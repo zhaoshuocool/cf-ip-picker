@@ -20,6 +20,8 @@ services:
       CF_TIMEOUT: "3"
       # 订阅输出前几个 IP，0 = 全部；也可用 /sub?n=3 临时覆盖
       CF_TOP: "0"
+      # 订阅/看板口令；留空 = 首次启动随机生成并落盘 /data/sub_token
+      # CF_SUB_TOKEN: "自己指定一个"
       CF_STATE_FILE: /data/state.json
       TZ: Asia/Shanghai
     volumes:

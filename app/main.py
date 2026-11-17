@@ -13,12 +13,15 @@ Cloudflare 边缘 IP，并对外提供一个可以直接导入 v2rayN / Clash �
 只用 Python 标准库，无第三方依赖。
 """
 
+import hmac
 import json
 import os
 import random
+import secrets
 import socket
 import ssl
 import statistics
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,6 +45,53 @@ CF_ROUNDS = int(os.environ.get("CF_ROUNDS", "3"))
 CF_TOP = int(os.environ.get("CF_TOP", "0"))
 CF_STATE_FILE = os.environ.get("CF_STATE_FILE", "")
 PORT = int(os.environ.get("PORT", "8080"))
+
+
+def _token_file_path():
+    """订阅口令落盘位置：优先 CF_TOKEN_FILE，其次数据目录。"""
+    explicit = os.environ.get("CF_TOKEN_FILE", "").strip()
+    if explicit:
+        return explicit
+    if CF_STATE_FILE:
+        return os.path.join(os.path.dirname(os.path.abspath(CF_STATE_FILE)) or ".", "sub_token")
+    if os.path.isdir("/data") and os.access("/data", os.W_OK):
+        return "/data/sub_token"
+    return os.path.join(tempfile.gettempdir(), "cf_sub_token")
+
+
+def load_or_create_token():
+    """口令来源：CF_SUB_TOKEN > 已落盘的口令 > 首次启动随机生成。"""
+    explicit = os.environ.get("CF_SUB_TOKEN", "").strip()
+    if explicit:
+        return explicit
+
+    path = _token_file_path()
+    try:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                saved = fh.read().strip()
+            if saved:
+                return saved
+    except OSError:
+        pass
+
+    token = secrets.token_urlsafe(9)  # 12 个 URL 安全字符
+    try:
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(token)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        print("警告：订阅口令无法落盘（{}），容器重启后会变".format(exc), flush=True)
+    return token
+
+
+# 所有页面与订阅都挂在 /s/<口令>/ 下，裸路径一律 404
+SUB_TOKEN = load_or_create_token()
 
 # 这些状态码说明「TLS 握手成功且请求到达了源站」。
 # 400 = xray 拒绝了不带 WebSocket 头的普通 GET
@@ -284,6 +334,7 @@ def snapshot():
         data = json.loads(json.dumps({k: v for k, v in STATE.items() if k != "history"}))
         data["history"] = STATE["history"][-10:]
     data["links"] = [vless_link(r["ip"]) for r in data["results"]] if STATE["uuid"] else []
+    data["base"] = "/s/" + SUB_TOKEN
     return data
 
 
@@ -329,8 +380,8 @@ async function tick(){
       `<tr><td>${i+1}</td><td class="${i===0?'best':''}">${x.ip}</td>
        <td>${x.ok}/${x.total}</td><td>${x.avg_ms} ms</td><td>${x.code}</td></tr>`).join('');
     document.getElementById('rows').innerHTML = rows || '<tr><td colspan="5">扫描中或暂无可用 IP</td></tr>';
-    document.getElementById('suburl').textContent = location.origin + '/sub';
-    document.getElementById('suburl3').textContent = location.origin + '/sub?n=3';
+    document.getElementById('suburl').textContent = location.origin + d.base + '/sub';
+    document.getElementById('suburl3').textContent = location.origin + d.base + '/sub?n=3';
     document.getElementById('bestlink').textContent =
       (d.links && d.links[0]) ? d.links[0] : '未设置 CF_UUID，无法生成分享链接';
   }catch(e){ document.getElementById('sub').textContent = '读取失败: '+e; }
@@ -371,24 +422,42 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        route = parsed.path.rstrip("/") or "/"
+        path = parsed.path
         query = parse_qs(parsed.query)
+
+        # 健康检查不需要口令，方便 NAS / 编排探活
+        if path.rstrip("/") == "/healthz":
+            return self._send(200, json.dumps({"ok": True}))
+
+        segs = [s for s in path.split("/") if s]
+        if len(segs) < 2 or segs[0] != "s" or not hmac.compare_digest(segs[1], SUB_TOKEN):
+            # 口令不对就和不存在一样，不暴露任何信息
+            return self._send(404, json.dumps({"error": "not found"}))
+
+        rest = segs[2:]
+        if not rest and not path.endswith("/"):
+            # /s/<口令> 补上结尾斜杠，页面里的相对路径才不会跑偏
+            self.send_response(302)
+            self.send_header("Location", "/s/{}/".format(SUB_TOKEN))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return None
+
+        route = "/".join(rest)
         data = snapshot()
 
-        if route in ("/", "/index.html"):
+        if route in ("", "index.html"):
             return self._send(200, DASHBOARD, "text/html; charset=utf-8")
-        if route == "/api/best":
+        if route == "api/best":
             return self._send(200, json.dumps(data, ensure_ascii=False))
-        if route == "/healthz":
-            return self._send(200, json.dumps({"ok": True}))
-        if route == "/sub":
+        if route == "sub":
             links = [l for l in data["links"] if l]
             limit = requested_top(query)
             if limit:
                 links = links[:limit]
             return self._send(200, "\n".join(links) + ("\n" if links else ""),
                               "text/plain; charset=utf-8")
-        if route == "/best.txt":
+        if route == "best.txt":
             rows = data["results"]
             limit = requested_top(query)
             if limit:
@@ -407,7 +476,11 @@ def main():
 
     threading.Thread(target=scheduler, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print("dashboard: http://0.0.0.0:{}/".format(PORT), flush=True)
+    print("看板:      http://<本机IP>:{}/s/{}/".format(PORT, SUB_TOKEN), flush=True)
+    print("订阅地址:  http://<本机IP>:{}/s/{}/sub".format(PORT, SUB_TOKEN), flush=True)
+    print("口令来源:  {}（可用 CF_SUB_TOKEN 固定，落盘文件 {}）".format(
+        "环境变量" if os.environ.get("CF_SUB_TOKEN", "").strip() else "自动生成/复用",
+        _token_file_path()), flush=True)
     server.serve_forever()
 
 

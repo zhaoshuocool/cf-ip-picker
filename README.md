@@ -28,7 +28,16 @@ docker run -d --name cf-ip-picker \
   ghcr.io/zhaoshuocool/cf-ip-picker:latest
 ```
 
-打开 `http://<设备IP>:8080/` 就能看到排名。
+打开容器日志能看到两个地址，形如：
+
+```
+看板:      http://<本机IP>:8080/s/-zocmsHl_KxL/
+订阅地址:  http://<本机IP>:8080/s/-zocmsHl_KxL/sub
+```
+
+`s/` 后面那段随机串是**首次启动自动生成的口令**，落盘在 `/data/sub_token`，重启不变。
+不带口令访问 `/`、`/sub`、`/api/best` 一律 404 —— 扫描你 8080 端口的人看不到任何东西。
+想自己指定口令就传 `-e CF_SUB_TOKEN=我自己的口令`。
 
 或者用 compose（推荐，见 `docker-compose.yml`）：
 
@@ -133,7 +142,7 @@ https://gist.githubusercontent.com/<你的用户名>/<gist id>/raw/cf-sub.txt
 > 注意：secret Gist 只是「不被搜索到」，拿到 URL 的人都能读。
 > 订阅内容里含 UUID，和任何订阅链接同等敏感，别公开贴出来。
 
-想完全避开这一层，直接用容器版 —— 它的 `/sub` 本身就是订阅地址。
+想完全避开这一层，直接用容器版 —— 它的 `/s/<口令>/sub` 本身就是订阅地址。
 
 ## 环境变量
 
@@ -150,22 +159,26 @@ https://gist.githubusercontent.com/<你的用户名>/<gist id>/raw/cf-sub.txt
 | `CF_ROUNDS` | `3` | 每个候选复测次数 |
 | `CF_TOP` | `0` | 订阅里输出前几个 IP；`0` = 全部可达 IP |
 | `CF_STATE_FILE` | 空 | 结果落盘路径，如 `/data/state.json` |
+| `CF_SUB_TOKEN` | 空 | 订阅/看板口令；留空则首次启动随机生成，落盘复用 |
+| `CF_TOKEN_FILE` | 数据目录下 `sub_token` | 口令落盘位置，容器里别放临时目录 |
 | `PORT` | `8080` | Web 端口 |
 
 ## 接口
 
 | 路径 | 说明 |
 | --- | --- |
-| `/` | 网页仪表盘，15 秒自动刷新 |
-| `/api/best` | JSON，完整排名与耗时 |
-| `/sub` | **订阅地址**，纯文本，每行一条 `vless://`（可直接粘进 v2rayN）。加 `?n=3` 只取前 3 条，覆盖 `CF_TOP` |
-| `/best.txt` | 纯文本排名，方便脚本读取 |
-| `/healthz` | 健康检查 |
+| `/s/<口令>/` | 网页仪表盘，15 秒自动刷新 |
+| `/s/<口令>/api/best` | JSON，完整排名与耗时 |
+| `/s/<口令>/sub` | **订阅地址**，纯文本，每行一条 `vless://`（可直接粘进 v2rayN）。加 `?n=3` 只取前 3 条，覆盖 `CF_TOP` |
+| `/s/<口令>/best.txt` | 纯文本排名，方便脚本读取 |
+| `/healthz` | 健康检查（不需要口令，供编排探活） |
+
+口令不对时和路径不存在返回同样的 404，不泄露「有没有这个服务」。
 
 ### 在 v2rayN 里用
 
-1. 打开 `http://<设备IP>:8080/`，确认有排名；
-2. v2rayN → 订阅 → 订阅设置 → 添加，地址填 `http://<设备IP>:8080/sub`；
+1. 打开 `http://<设备IP>:8080/s/<口令>/`，确认有排名；
+2. v2rayN → 订阅 → 订阅设置 → 添加，地址填 `http://<设备IP>:8080/s/<口令>/sub`；
 3. 更新订阅，会得到一组 `CF-<IP>` 节点，哪个快用哪个。
 
 生成的链接长这样：
