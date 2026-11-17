@@ -3,6 +3,10 @@ services:
     image: ghcr.io/zhaoshuocool/cf-ip-picker:latest
     container_name: cf-ip-picker
     restart: unless-stopped
+    # 容器内运行身份。bind mount 的宿主目录属主是哪个 uid，就把 PUID/PGID 设成哪个；
+    # 飞牛 NAS 的普通用户通常是 1000，在同目录建 .env 写 PUID=1000 / PGID=1000 即可。
+    # 用命名卷时保持默认 10001。
+    user: "${PUID:-10001}:${PGID:-10001}"
     ports:
       - "8080:8080"
     environment:

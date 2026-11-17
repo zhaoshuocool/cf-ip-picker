@@ -202,18 +202,28 @@ vless://<uuid>@104.26.10.78:443?encryption=none&security=tls&sni=link.example.co
 
 **`警告：订阅口令无法落盘（Permission denied: '/data/sub_token'）`**
 
-容器以 uid 10001 运行，而 bind mount 的 `./data` 归宿主机的 root 所有，写不进去。三选一：
+容器以 uid 10001 运行，而 bind mount 的目录归宿主机某个人所有，两者不一致就写不进去。先看目录属主：
 
 ```bash
-# 1) 改用命名卷（compose 默认就是，最省事）
-#    确认 compose 里是 cfip-data:/data，然后 docker compose up -d
-
-# 2) 继续用 bind mount，把目录交给容器用户
-sudo chown -R 10001:10001 ./data
-
-# 3) 直接固定口令，根本不需要落盘
--e CF_SUB_TOKEN=你的口令
+ls -ln /vol1/1000/docker/v2rayN/data     # 输出第 3/4 列是 uid/gid
 ```
+
+然后按属主选一个办法：
+
+```bash
+# 1) 让容器就用这个 uid 跑（最推荐；飞牛普通用户通常是 1000）
+echo "PUID=1000" >> .env
+echo "PGID=1000" >> .env
+docker compose up -d --force-recreate
+
+# 2) 反过来，把目录交给容器用户 10001
+sudo chown -R 10001:10001 /vol1/1000/docker/v2rayN/data
+
+# 3) 不想碰权限：直接固定口令，根本不需要落盘
+#    environment: CF_SUB_TOKEN: "自己编一个"
+```
+
+注意 `user:` 设定后容器内不再有特权，`/data` 里文件的属主会是这个 uid —— 这正合适，宿主上你自己也能改。
 
 **看板显示「CF_UUID 未配置」但 compose 里明明写了**
 
