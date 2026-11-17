@@ -47,46 +47,73 @@ CF_STATE_FILE = os.environ.get("CF_STATE_FILE", "")
 PORT = int(os.environ.get("PORT", "8080"))
 
 
-def _token_file_path():
-    """订阅口令落盘位置：优先 CF_TOKEN_FILE，其次数据目录。"""
+def _token_candidates():
+    """口令落盘候选位置，按优先级排列；第一个能读/能写的生效。"""
+    paths = []
     explicit = os.environ.get("CF_TOKEN_FILE", "").strip()
     if explicit:
-        return explicit
+        paths.append(explicit)
     if CF_STATE_FILE:
-        return os.path.join(os.path.dirname(os.path.abspath(CF_STATE_FILE)) or ".", "sub_token")
-    if os.path.isdir("/data") and os.access("/data", os.W_OK):
-        return "/data/sub_token"
-    return os.path.join(tempfile.gettempdir(), "cf_sub_token")
+        paths.append(os.path.join(
+            os.path.dirname(os.path.abspath(CF_STATE_FILE)) or ".", "sub_token"))
+    if os.path.isdir("/data"):
+        paths.append("/data/sub_token")
+    paths.append(os.path.join(tempfile.gettempdir(), "cf_sub_token"))
+    seen, out = set(), []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+TOKEN_FILE = ""
 
 
 def load_or_create_token():
     """口令来源：CF_SUB_TOKEN > 已落盘的口令 > 首次启动随机生成。"""
+    global TOKEN_FILE
+
     explicit = os.environ.get("CF_SUB_TOKEN", "").strip()
     if explicit:
         return explicit
 
-    path = _token_file_path()
-    try:
-        if os.path.exists(path):
+    candidates = _token_candidates()
+
+    for path in candidates:
+        try:
             with open(path, encoding="utf-8") as fh:
                 saved = fh.read().strip()
             if saved:
+                TOKEN_FILE = path
                 return saved
-    except OSError:
-        pass
+        except OSError:
+            continue
 
     token = secrets.token_urlsafe(9)  # 12 个 URL 安全字符
-    try:
-        parent = os.path.dirname(os.path.abspath(path))
-        os.makedirs(parent, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(token)
+    first_error = None
+    for path in candidates:
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-    except OSError as exc:
-        print("警告：订阅口令无法落盘（{}），容器重启后会变".format(exc), flush=True)
+            parent = os.path.dirname(os.path.abspath(path))
+            os.makedirs(parent, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(token)
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+            TOKEN_FILE = path
+            if first_error is not None:
+                print("提示：{} 不可写（{}），口令已改存到 {}".format(
+                    candidates[0], first_error, path), flush=True)
+            return token
+        except OSError as exc:
+            first_error = first_error or exc
+
+    print("警告：订阅口令无处落盘（{}），本次口令 {} 在容器重建后会变。\n"
+          "      解决办法二选一：compose 里用命名卷 cfip-data:/data，"
+          "或 chown 10001:10001 数据目录；"
+          "也可以直接设 CF_SUB_TOKEN 固定口令。".format(first_error, token), flush=True)
     return token
 
 
@@ -486,7 +513,7 @@ def main():
     print("订阅地址:  http://<本机IP>:{}/s/{}/sub".format(PORT, SUB_TOKEN), flush=True)
     print("口令来源:  {}（可用 CF_SUB_TOKEN 固定，落盘文件 {}）".format(
         "环境变量" if os.environ.get("CF_SUB_TOKEN", "").strip() else "自动生成/复用",
-        _token_file_path()), flush=True)
+        TOKEN_FILE or "未落盘"), flush=True)
     server.serve_forever()
 
 

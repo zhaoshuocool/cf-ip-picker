@@ -198,6 +198,39 @@ vless://<uuid>@104.26.10.78:443?encryption=none&security=tls&sni=link.example.co
 探测返回 `101 / 200 / 204 / 400 / 404` 都算「通」。其中 `400` 是 xray 对普通 GET（没有 WebSocket 头）的正常拒绝，
 `404` 是 xray 对未知路径的默认响应 —— 两者都证明 TLS 握手成功、请求确实打到了你的源站。
 
+## 排错
+
+**`警告：订阅口令无法落盘（Permission denied: '/data/sub_token'）`**
+
+容器以 uid 10001 运行，而 bind mount 的 `./data` 归宿主机的 root 所有，写不进去。三选一：
+
+```bash
+# 1) 改用命名卷（compose 默认就是，最省事）
+#    确认 compose 里是 cfip-data:/data，然后 docker compose up -d
+
+# 2) 继续用 bind mount，把目录交给容器用户
+sudo chown -R 10001:10001 ./data
+
+# 3) 直接固定口令，根本不需要落盘
+-e CF_SUB_TOKEN=你的口令
+```
+
+**看板显示「CF_UUID 未配置」但 compose 里明明写了**
+
+先确认容器真的拿到了变量：
+
+```bash
+docker compose exec cf-ip-picker printenv CF_HOST CF_UUID
+docker compose config | grep -E "CF_HOST|CF_UUID"
+```
+
+如果 `printenv` 里是 `link.example.com` / 全零 UUID，说明跑的还是示例值：
+改了文件但没 `up -d` 重建、或者容器是早先 `docker run` 起的、或者在飞牛 UI 里没点应用。
+
+**日志里 `host=link.example.com`**
+
+同上 —— 域名没传进去，扫描的是示例域名，当然选不出你的节点。
+
 ## 构建
 
 镜像由 GitHub Actions 自动构建并推送到 GHCR（`linux/amd64` + `linux/arm64`）：
