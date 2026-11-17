@@ -107,6 +107,34 @@ ql raw https://raw.githubusercontent.com/zhaoshuocool/cf-ip-picker/main/qinglong
 - `cf_sub.txt` —— 前 N 名的 `vless://` 链接，每行一条，可整段导入 v2rayN
 - `cf_picker_state.json` —— 上一轮结果，用于变化检测
 
+### 想要「订阅链接」怎么办
+
+青龙是一次性执行的脚本，没有常驻 HTTP 服务，所以本地文件变不成 URL。
+两种做法：
+
+**A. 发布到 GitHub Gist（推荐，免费且稳定）**
+
+1. GitHub → Settings → Developer settings → Personal access tokens，
+   建一个带 `gist` 权限的 token；
+2. 青龙环境变量加 `GITHUB_TOKEN=<token>`、`CF_GIST_CREATE=1`，跑一次；
+3. 日志里会打印新 Gist 的 id 和订阅地址，把 `CF_GIST_ID=<id>` 也加进环境变量；
+4. 之后每轮只更新这个 Gist，订阅地址不变：
+
+```
+https://gist.githubusercontent.com/<你的用户名>/<gist id>/raw/cf-sub.txt
+```
+
+把上面这行填进 v2rayN 的订阅设置即可。`CF_GIST_FILENAME` 可以换文件名（默认 `cf-sub.txt`）。
+
+**B. 推到你自己的地址**
+
+设 `CF_PUSH_URL`，脚本会 POST 纯文本过去（适合推到自己的静态站、对象存储签名接口等）。
+
+> 注意：secret Gist 只是「不被搜索到」，拿到 URL 的人都能读。
+> 订阅内容里含 UUID，和任何订阅链接同等敏感，别公开贴出来。
+
+想完全避开这一层，直接用容器版 —— 它的 `/sub` 本身就是订阅地址。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |

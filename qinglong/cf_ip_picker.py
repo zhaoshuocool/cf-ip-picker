@@ -142,6 +142,67 @@ def vless_link(ip):
         UUID, ip, query, ip.replace(".", "-"))
 
 
+def _github(method, url, payload, token):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method=method, headers={
+        "Authorization": "Bearer " + token,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "User-Agent": "cf-ip-picker",
+    })
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        return json.loads(resp.read())
+
+
+def publish_subscription(text):
+    """把订阅内容发布到一个可被 v2rayN 直接订阅的 URL。
+
+    支持两种目标：
+      1. GitHub Gist（CF_GIST_ID + GITHUB_TOKEN）：最省事，raw 链接就是订阅地址；
+      2. 任意自建地址（CF_PUSH_URL）：POST 纯文本过去，适合推到自己的静态站。
+    返回订阅 URL，失败返回 None。
+    """
+    name = os.environ.get("CF_GIST_FILENAME", "cf-sub.txt").strip() or "cf-sub.txt"
+    token = (os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
+    gist_id = os.environ.get("CF_GIST_ID", "").strip()
+
+    if token and (gist_id or os.environ.get("CF_GIST_CREATE", "").strip() in ("1", "true", "yes")):
+        try:
+            if gist_id:
+                data = _github("PATCH", "https://api.github.com/gists/" + gist_id,
+                               {"files": {name: {"content": text}}}, token)
+            else:
+                data = _github("POST", "https://api.github.com/gists", {
+                    "description": "cf-ip-picker subscription",
+                    "public": False,
+                    "files": {name: {"content": text}},
+                }, token)
+                log("已创建新 Gist，把它填进环境变量后再跑一次就不用重建：")
+                log("  CF_GIST_ID={}".format(data.get("id")))
+            owner = (data.get("owner") or {}).get("login", "")
+            url = "https://gist.githubusercontent.com/{}/{}/raw/{}".format(
+                owner, data.get("id"), name)
+            log("订阅地址：{}".format(url))
+            return url
+        except Exception as exc:
+            log("Gist 发布失败：{}".format(exc))
+
+    push_url = os.environ.get("CF_PUSH_URL", "").strip()
+    if push_url:
+        try:
+            req = urllib.request.Request(
+                push_url, data=text.encode("utf-8"), method="POST",
+                headers={"Content-Type": "text/plain; charset=utf-8",
+                         "User-Agent": "cf-ip-picker"})
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                resp.read()
+            log("订阅已推送到：{}".format(push_url))
+            return push_url
+        except Exception as exc:
+            log("推送订阅失败：{}".format(exc))
+    return None
+
+
 def notify(title, content):
     """尽量用面板里已配置的推送渠道发一条通知；失败不影响任务结果。"""
     def post(url, data=None, payload=None, headers=None):
@@ -280,6 +341,10 @@ def main():
                       fh, ensure_ascii=False, indent=2)
     except Exception as exc:
         log("写文件失败（不影响结果）：{}".format(exc))
+
+    sub_text = "".join(l + "\n" for l in links if l)
+    if sub_text:
+        publish_subscription(sub_text)
 
     if links and links[0]:
         log("")
