@@ -335,6 +335,7 @@ def snapshot():
         data["history"] = STATE["history"][-10:]
     data["links"] = [vless_link(r["ip"]) for r in data["results"]] if STATE["uuid"] else []
     data["base"] = "/s/" + SUB_TOKEN
+    data["uuid_set"] = bool(STATE["uuid"])
     return data
 
 
@@ -374,16 +375,20 @@ async function tick(){
     const r = await fetch('api/best',{cache:'no-store'});
     const d = await r.json();
     const t = d.updated_at ? new Date(d.updated_at*1000).toLocaleString() : '尚未扫描';
+    const uuidNote = d.uuid_set ? 'CF_UUID 已配置' : 'CF_UUID 未配置';
     document.getElementById('sub').textContent =
-      `域名 ${d.host}${d.path} · 上次扫描 ${t} · 共测 ${d.tested} 个 · 可达 ${d.reachable} 个 · 订阅 ${d.links.length} 条`;
+      `域名 ${d.host}${d.path} · ${uuidNote} · 上次扫描 ${t} · 共测 ${d.tested} 个 · 可达 ${d.reachable} 个 · 订阅 ${d.links.length} 条`;
     const rows = d.results.slice(0,10).map((x,i)=>
       `<tr><td>${i+1}</td><td class="${i===0?'best':''}">${x.ip}</td>
        <td>${x.ok}/${x.total}</td><td>${x.avg_ms} ms</td><td>${x.code}</td></tr>`).join('');
     document.getElementById('rows').innerHTML = rows || '<tr><td colspan="5">扫描中或暂无可用 IP</td></tr>';
     document.getElementById('suburl').textContent = location.origin + d.base + '/sub';
     document.getElementById('suburl3').textContent = location.origin + d.base + '/sub?n=3';
-    document.getElementById('bestlink').textContent =
-      (d.links && d.links[0]) ? d.links[0] : '未设置 CF_UUID，无法生成分享链接';
+    const first = d.links && d.links[0];
+    document.getElementById('bestlink').textContent = first ? first
+      : (d.uuid_set
+          ? (d.scanning ? '正在首轮扫描，稍后自动刷新…' : '暂无可用 IP，等下一轮扫描')
+          : '未设置 CF_UUID（检查容器环境变量）');
   }catch(e){ document.getElementById('sub').textContent = '读取失败: '+e; }
 }
 tick(); setInterval(tick, 15000);
@@ -473,6 +478,7 @@ def main():
         CF_HOST or "(未设置)", CF_PATH, CF_INTERVAL, PORT), flush=True)
     if not CF_HOST:
         print("警告：CF_HOST 未设置，扫描会失败。请通过环境变量传入域名。", flush=True)
+    print("UUID:      {}".format("已配置" if CF_UUID else "未配置，只测速不生成订阅"), flush=True)
 
     threading.Thread(target=scheduler, daemon=True).start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
